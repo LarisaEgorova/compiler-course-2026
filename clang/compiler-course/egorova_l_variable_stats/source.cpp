@@ -74,7 +74,6 @@ public:
       return true;
     }
 
-    // Пропускаем параметры функций - они обрабатываются в VisitParmVarDecl
     if (isa<ParmVarDecl>(VD)) {
       return true;
     }
