@@ -16,42 +16,40 @@ struct VariableStats {
   int local = 0;
   int parameter = 0;
 
-  int total_files = 0;
   int total_functions = 0;
   std::string current_file;
 
   void print() {
-    llvm::outs() << "\n=== Variable Statistics for Translation Unit ===\n";
+    auto &out = llvm::outs();
+    out << "\n=== Variable Statistics for Translation Unit ===\n";
     if (!current_file.empty()) {
-      llvm::outs() << "File: " << current_file << "\n";
+      out << "File: " << current_file << "\n";
     }
-    llvm::outs() << "Global variables:        " << global << "\n";
-    llvm::outs() << "Static global variables: " << static_global << "\n";
-    llvm::outs() << "Static local variables:  " << static_local << "\n";
-    llvm::outs() << "Local variables:         " << local << "\n";
-    llvm::outs() << "Function parameters:     " << parameter << "\n";
-    llvm::outs() << "==============================================\n";
-    llvm::outs() << "TOTAL:                   "
-                 << (global + static_global + static_local + local + parameter)
-                 << "\n";
+    out << "Global variables:        " << global << "\n";
+    out << "Static global variables: " << static_global << "\n";
+    out << "Static local variables:  " << static_local << "\n";
+    out << "Local variables:         " << local << "\n";
+    out << "Function parameters:     " << parameter << "\n";
+    out << "==============================================\n";
+    out << "TOTAL:                   "
+        << (global + static_global + static_local + local + parameter) << "\n";
     if (total_functions > 0) {
-      llvm::outs() << "Functions analyzed:      " << total_functions << "\n";
+      out << "Functions analyzed:      " << total_functions << "\n";
     }
-    llvm::outs() << "\n";
+    out << "\n";
   }
 };
 
 class EgorovaVariableStatsVisitor final
     : public RecursiveASTVisitor<EgorovaVariableStatsVisitor> {
 public:
-  explicit EgorovaVariableStatsVisitor(ASTContext *context,
-                                       VariableStats &stats)
+  EgorovaVariableStatsVisitor(ASTContext *context, VariableStats &stats)
       : m_context(context), m_stats(stats) {
 
     SourceManager &sm = context->getSourceManager();
-    if (sm.isInMainFile(sm.getLocForStartOfFile(sm.getMainFileID()))) {
-      StringRef filename =
-          sm.getFilename(sm.getLocForStartOfFile(sm.getMainFileID()));
+    SourceLocation mainFileLoc = sm.getLocForStartOfFile(sm.getMainFileID());
+    if (sm.isInMainFile(mainFileLoc)) {
+      StringRef filename = sm.getFilename(mainFileLoc);
       if (!filename.empty()) {
         m_stats.current_file = filename.str();
       }
@@ -59,18 +57,15 @@ public:
   }
 
   bool VisitFunctionDecl(FunctionDecl *FD) {
-    if (FD->isThisDeclarationADefinition()) {
+    if (FD->isThisDeclarationADefinition() && isInMainFile(FD->getLocation())) {
       m_stats.total_functions++;
     }
     return true;
   }
 
   bool VisitVarDecl(VarDecl *VD) {
-    if (VD->isImplicit() || VD->getLocation().isInvalid()) {
-      return true;
-    }
-
-    if (!isInMainFile(VD->getLocation())) {
+    if (VD->isImplicit() || VD->getLocation().isInvalid() ||
+        !isInMainFile(VD->getLocation())) {
       return true;
     }
 
@@ -78,25 +73,21 @@ public:
       return true;
     }
 
+    if (!VD->isThisDeclarationADefinition()) {
+      return true;
+    }
+
     if (!VD->isFileVarDecl()) {
       if (VD->isStaticLocal()) {
         m_stats.static_local++;
-        llvm::outs() << "Static local: " << VD->getNameAsString() << " ("
-                     << VD->getType().getAsString() << ")\n";
       } else {
         m_stats.local++;
-        llvm::outs() << "Local: " << VD->getNameAsString() << " ("
-                     << VD->getType().getAsString() << ")\n";
       }
     } else {
       if (VD->getStorageClass() == SC_Static) {
         m_stats.static_global++;
-        llvm::outs() << "Static global: " << VD->getNameAsString() << " ("
-                     << VD->getType().getAsString() << ")\n";
       } else {
         m_stats.global++;
-        llvm::outs() << "Global: " << VD->getNameAsString() << " ("
-                     << VD->getType().getAsString() << ")\n";
       }
     }
     return true;
@@ -106,10 +97,13 @@ public:
     if (!isInMainFile(PD->getLocation())) {
       return true;
     }
+    if (auto *FD = dyn_cast<FunctionDecl>(PD->getDeclContext())) {
+      if (!FD->isThisDeclarationADefinition()) {
+        return true;
+      }
+    }
 
     m_stats.parameter++;
-    llvm::outs() << "Parameter: " << PD->getNameAsString() << " ("
-                 << PD->getType().getAsString() << ")\n";
     return true;
   }
 
@@ -117,8 +111,7 @@ private:
   bool isInMainFile(SourceLocation Loc) {
     if (Loc.isInvalid())
       return false;
-    SourceManager &SM = m_context->getSourceManager();
-    return SM.isInMainFile(Loc);
+    return m_context->getSourceManager().isInMainFile(Loc);
   }
 
   ASTContext *m_context;
@@ -128,7 +121,7 @@ private:
 class EgorovaVariableStatsConsumer final : public ASTConsumer {
 public:
   explicit EgorovaVariableStatsConsumer(ASTContext *context)
-      : m_stats(), m_visitor(context, m_stats) {}
+      : m_visitor(context, m_stats) {}
 
   void HandleTranslationUnit(ASTContext &context) override {
     m_visitor.TraverseDecl(context.getTranslationUnitDecl());
@@ -147,12 +140,12 @@ public:
     return std::make_unique<EgorovaVariableStatsConsumer>(&CI.getASTContext());
   }
 
-  bool ParseArgs(const CompilerInstance &CI,
-                 const std::vector<std::string> &args) override {
+  bool ParseArgs(const CompilerInstance &,
+                 const std::vector<std::string> &) override {
     return true;
   }
 };
 
 static FrontendPluginRegistry::Add<EgorovaVariableStatsAction>
     X("egorova-variable-stats",
-      "Plugin for collecting statistics about variables in translation unit");
+      "Plugin for collecting statistics about variables");
