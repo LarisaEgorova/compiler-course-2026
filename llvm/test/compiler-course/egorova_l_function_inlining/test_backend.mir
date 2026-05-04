@@ -2,6 +2,7 @@
 # RUN: --load=%llvmshlibdir/egorova_l_function_inlining_BACKEND%shlibext \
 # RUN: -run-pass=egorova-x86-inline %s -o - | FileCheck %s
 
+# recfun: recursive, depth limit 3 — call remains
 # CHECK-LABEL: name: recfun
 # CHECK: ADD32ri
 # CHECK: ADD32ri
@@ -19,6 +20,7 @@ body: |
     CALL64pcrel32 @recfun
     RET64
 
+# bigfun: 16 instrs > MaxInlineInstrs=15, NOT inlined
 # CHECK-LABEL: name: caller_big
 # CHECK: CALL64pcrel32 @bigfun
 # CHECK: RET64
@@ -44,7 +46,6 @@ body: |
     %14:gr32 = MOV32ri 14
     %15:gr32 = MOV32ri 15
     RET64
-
 ---
 name: caller_big
 tracksRegLiveness: true
@@ -53,8 +54,10 @@ body: |
     CALL64pcrel32 @bigfun
     RET64
 
+# smallfun: 4 instrs, 1 BB — inlined, call removed
 # CHECK-LABEL: name: caller_small
-# CHECK: CALL64pcrel32 @smallfun
+# CHECK-NOT: CALL64pcrel32 @smallfun
+# CHECK: ADD32ri
 # CHECK: RET64
 ---
 name: smallfun
@@ -66,7 +69,6 @@ body: |
     %1:gr32 = ADD32ri %0, 5, implicit-def $eflags
     $eax = COPY %1
     RET64
-
 ---
 name: caller_small
 tracksRegLiveness: true
@@ -76,6 +78,7 @@ body: |
     CALL64pcrel32 @smallfun
     RET64
 
+# foo1: 2 instrs — inlined into foo2
 # CHECK-LABEL: name: foo1
 # CHECK: ADD32ri
 # CHECK: RET64
@@ -88,8 +91,11 @@ body: |
     %1:gr32 = ADD32ri %0, 7, implicit-def $eflags
     RET64
 
+# foo2: foo1 inlined, call removed
 # CHECK-LABEL: name: foo2
-# CHECK: CALL64pcrel32 @foo1
+# CHECK-NOT: CALL64pcrel32 @foo1
+# CHECK: MOV32ri
+# CHECK: ADD32ri
 # CHECK: SUB32ri
 # CHECK: RET64
 ---
@@ -102,8 +108,12 @@ body: |
     %3:gr32 = SUB32ri %2, 3, implicit-def $eflags
     RET64
 
+# foo3: foo2 inlined (foo2 original size = 3 instrs <= 15), body of foo1 also appears
 # CHECK-LABEL: name: foo3
-# CHECK: CALL64pcrel32 @foo2
+# CHECK-NOT: CALL64pcrel32 @foo2
+# CHECK: MOV32ri
+# CHECK: ADD32ri
+# CHECK: SUB32ri
 # CHECK: XOR32rr
 # CHECK: RET64
 ---
@@ -115,6 +125,7 @@ body: |
     %4:gr32 = XOR32rr %4, %4, implicit-def $eflags
     RET64
 
+# multi_bb_func: 3 BBs — NOT inlined
 # CHECK-LABEL: name: caller_multi_bb
 # CHECK: CALL64pcrel32 @multi_bb_func
 # CHECK: RET64
@@ -132,7 +143,6 @@ body: |
   bb.2:
     %2:gr32 = MOV32ri 2
     RET64
-
 ---
 name: caller_multi_bb
 tracksRegLiveness: true
@@ -141,6 +151,7 @@ body: |
     CALL64pcrel32 @multi_bb_func
     RET64
 
+# double_rec: recursive, depth limit 3 — call remains
 # CHECK-LABEL: name: double_rec
 # CHECK: ADD32ri
 # CHECK: ADD32ri
@@ -158,6 +169,41 @@ body: |
     CALL64pcrel32 @double_rec
     RET64
 
+# exactly15: 13 MOV + 1 ADD + 1 RET = 15 total instrs — IS inlined
+# CHECK-LABEL: name: caller_exactly15
+# CHECK-NOT: CALL64pcrel32 @exactly15
+# CHECK: MOV32ri
+# CHECK: ADD32ri
+# CHECK: RET64
+---
+name: exactly15
+tracksRegLiveness: true
+body: |
+  bb.0:
+    %0:gr32 = MOV32ri 0
+    %1:gr32 = MOV32ri 1
+    %2:gr32 = MOV32ri 2
+    %3:gr32 = MOV32ri 3
+    %4:gr32 = MOV32ri 4
+    %5:gr32 = MOV32ri 5
+    %6:gr32 = MOV32ri 6
+    %7:gr32 = MOV32ri 7
+    %8:gr32 = MOV32ri 8
+    %9:gr32 = MOV32ri 9
+    %10:gr32 = MOV32ri 10
+    %11:gr32 = MOV32ri 11
+    %12:gr32 = MOV32ri 12
+    %13:gr32 = ADD32ri %0, 1, implicit-def $eflags
+    RET64
+---
+name: caller_exactly15
+tracksRegLiveness: true
+body: |
+  bb.0:
+    CALL64pcrel32 @exactly15
+    RET64
+
+# borderline: 15 MOV + 1 RET = 16 instrs (RET counts) — NOT inlined
 # CHECK-LABEL: name: caller_borderline
 # CHECK: CALL64pcrel32 @borderline
 # CHECK: RET64
@@ -182,7 +228,6 @@ body: |
     %13:gr32 = MOV32ri 13
     %14:gr32 = MOV32ri 14
     RET64
-
 ---
 name: caller_borderline
 tracksRegLiveness: true
