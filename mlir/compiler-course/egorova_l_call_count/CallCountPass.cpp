@@ -9,11 +9,13 @@
 using namespace mlir;
 
 namespace {
-class CallCountPass : public PassWrapper<CallCountPass, OperationPass<ModuleOp>> {
+class CallCountPass
+    : public PassWrapper<CallCountPass, OperationPass<ModuleOp>> {
 public:
   StringRef getArgument() const final { return "call-count"; }
   StringRef getDescription() const final {
-    return "Counts how many times each func.func is called by other functions and attaches it as an attribute";
+    return "Counts how many times each func.func is called by other functions "
+           "and attaches it as an attribute";
   }
 
   void runOnOperation() override {
@@ -21,9 +23,8 @@ public:
 
     llvm::DenseMap<StringRef, int64_t> callCounts;
 
-    moduleOp.walk([&](func::FuncOp funcOp) {
-      callCounts[funcOp.getSymName()] = 0;
-    });
+    moduleOp.walk(
+        [&](func::FuncOp funcOp) { callCounts[funcOp.getSymName()] = 0; });
 
     moduleOp.walk([&](func::CallOp callOp) {
       StringRef callee = callOp.getCallee();
@@ -36,12 +37,13 @@ public:
     moduleOp.walk([&](func::FuncOp funcOp) {
       StringRef name = funcOp.getSymName();
       int64_t count = callCounts.lookup(name);
-      funcOp->setAttr("call_count", IntegerAttr::get(
-          IntegerType::get(&getContext(), 64), count));
+      funcOp->setAttr(
+          "call_count",
+          IntegerAttr::get(IntegerType::get(&getContext(), 64), count));
     });
   }
 };
-}
+} // namespace
 
 MLIR_DECLARE_EXPLICIT_TYPE_ID(CallCountPass)
 MLIR_DEFINE_EXPLICIT_TYPE_ID(CallCountPass)
