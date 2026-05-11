@@ -1,4 +1,4 @@
-// RUN: mlir-opt -load-pass-plugin=%mlir_lib_dir/call-count%shlibext --pass-pipeline="builtin.module(call-count)" %s | FileCheck %s
+// RUN: mlir-opt -load-pass-plugin=%mlir_lib_dir/egorova_l_call_count_MLIR%shlibext --pass-pipeline="builtin.module(call-count)" %s | FileCheck %s
 
 // CHECK-LABEL: func.func @foo
 // CHECK-SAME: call_count = 0
